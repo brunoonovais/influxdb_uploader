@@ -189,6 +189,7 @@ class InfluxDBUploaderThread(threading.Thread):
             #print(response)
         except Exception as e:
             print(f'Exception. \n{e}')
+            return False
         else:
             return True
 
