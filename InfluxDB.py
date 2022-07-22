@@ -3,6 +3,8 @@ import threading
 import time
 from typing import Dict, Any, List
 from requests import request, Response
+import traceback
+
 
 class TooBig(Exception):
     pass
@@ -15,6 +17,7 @@ class InfluxDBUploader:
         self.port: str = kwargs['port']
         self.log: Logger = logging.getLogger('influxdb')
         self.database: str = kwargs['database']
+        self.version: str = kwargs['version']
         # end of values set by instantiation
 
         self.url: str = f"http://{self.ip}:{self.port}"
@@ -104,13 +107,14 @@ class InfluxDBUploader:
         '''
 
         # for each dictionary, we will build a line protocol entry and append to 'lines'
-        lines=[]
+        lines = []
         [lines.append(self._create_line_protocol(item)) for item in bulk_list]
 
         if self._send(lines):
             return True
         else:
             return False
+
 
 class InfluxDBUploaderThread(threading.Thread):
 
@@ -123,11 +127,22 @@ class InfluxDBUploaderThread(threading.Thread):
         self.database: str = kwargs['database']
         self.batch_size = kwargs['batch_size']
         self.sleep = kwargs['sleep']
+        self.org: str = kwargs['org']
+        self.token: str = kwargs['token']
         # end of values set by instantiation
 
         self.bulk_list = []
         self.url: str = f"http://{self.ip}:{self.port}"
-        self.api_url: str = f"{self.url}/api/v2/write?precision=ms&bucket={self.database}"
+
+        if "version" in kwargs:
+            self.version = kwargs["version"]
+        else:
+            self.version = 2.0
+
+        if self.version >= 2.3:
+            self.api_url: str = f"{self.url}/api/v2/write?org={self.org}&bucket={self.database}&precision=ms"
+        else:
+            self.api_url: str = f"{self.url}/api/v2/write?precision=ms&bucket={self.database}"
         self.log.debug(self.url)
         self.log.debug("Started InfluxDB Uploader")
 
@@ -138,6 +153,11 @@ class InfluxDBUploaderThread(threading.Thread):
             self.headers = {
                 'Content-Type': 'text/plain',
                 'Authorization': f'Basic {base_64_auth}'
+            }
+        elif "token" in kwargs:
+            self.headers = {
+                'Content-Type': 'text/plain',
+                'Authorization': f'Token {self.token}'
             }
         else:
             self.headers = {
@@ -162,14 +182,14 @@ class InfluxDBUploaderThread(threading.Thread):
             if key in ["measurement_name", "timestamp"]:
                 continue
             elif isinstance(value, str):
-                #print(f'key={key} & value = {value} are string')
+                # print(f'key={key} & value = {value} are string')
                 line_tags.append(f"{key}={value}")
             else:
-                #print(f'key={key} & value = {value} are NOT string')
+                # print(f'key={key} & value = {value} are NOT string')
                 line_fields.append(f"{key}={value}")
 
         line = f'{line_measurement},{",".join(line_tags)} {",".join(line_fields)} {line_timestamp}'
-        #print(f'line = {line}')
+        print(f'line = {line}')
 
         return line
 
@@ -183,12 +203,13 @@ class InfluxDBUploaderThread(threading.Thread):
 
         try:
             print(f'uploading {len(lines)} lines to {self.api_url}')
-            #print(f'headers={self.headers}')
-            #print(f'lines=\n{lines}')
+            # print(f'headers={self.headers}')
+            # print(f'lines=\n{lines}')
             response = request("POST", self.api_url, headers=self.headers, data="\n".join(lines))
-            #print(response)
+            print(response)
         except Exception as e:
             print(f'Exception. \n{e}')
+            traceback.print_exc()
             return False
         else:
             return True
@@ -208,9 +229,9 @@ class InfluxDBUploaderThread(threading.Thread):
             # bulk_list needs to be equal to batch size and smaller than 5000 for influxdb
             bulk_list_size = len(self.bulk_list)
             if bulk_list_size >= self.batch_size and bulk_list_size < 5000:
-                lines=[]
+                lines = []
                 [lines.append(self._create_line_protocol(item)) for item in self.bulk_list]
-                
+
                 # if upload is successful, we clear the bulk_list
                 if self._send(lines):
                     self.bulk_list.clear()
@@ -218,6 +239,7 @@ class InfluxDBUploaderThread(threading.Thread):
                     self.log.error(f'failed to upload to influxdb')
             elif bulk_list_size >= 5000:
                 raise TooBig("bulk_list has grown beyond acceptable limit of 5000. Exiting...")
-            
+
             self.log.info(f'sleeping for {self.sleep}')
             time.sleep(self.sleep)
+
