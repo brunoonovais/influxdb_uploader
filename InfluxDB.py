@@ -1,3 +1,4 @@
+import base64
 import logging
 import threading
 import time
@@ -18,21 +19,43 @@ class InfluxDBUploader:
         self.log: Logger = logging.getLogger('influxdb')
         self.database: str = kwargs['database']
         self.version: str = kwargs['version']
+        self.org: str = kwargs['org']
+        self.token: str = kwargs['token']
         # end of values set by instantiation
 
         self.url: str = f"http://{self.ip}:{self.port}"
-        self.api_url: str = f"{self.url}/api/v2/write?precision=ms&bucket={self.database}"
+
+        if "version" in kwargs:
+            self.version = kwargs["version"]
+        else:
+            self.version = 2.0
+
+        if self.version >= 2.3:
+            self.api_url: str = f"{self.url}/api/v2/write?org={self.org}&bucket={self.database}&precision=ms"
+        else:
+            self.api_url: str = f"{self.url}/api/v2/write?precision=ms&bucket={self.database}"
         self.log.debug(self.url)
 
         self.log.debug("Started InfluxDB Uploader")
 
         if "username" in kwargs:
-            base_64_auth: str = f'{kwargs["username"]}:{kwargs["password"]}'
-            base_64_auth: bytes = base64.b64encode(base_64_auth.encode())
-            base_64_auth: str = base_64_auth.decode()
+            #base_64_auth: str = f'{kwargs["username"]}:{kwargs["password"]}'
+            #base_64_auth: bytes = base64.b64encode(base_64_auth.encode())
+            #base_64_auth: str = base_64_auth.decode()
+            #self.headers = {
+            #    'Content-Type': 'text/plain',
+            #    'Authorization': f'Basic {base_64_auth}'
+            #}
+            self.headers = {
+                'Content-Type': 'text/plain'
+            }
+
+            self.api_url = f'{self.api_url}&u={kwargs["username"]}&p={kwargs["password"]}'
+            print(f"self.api_url = {self.api_url}")
+        elif "token" in kwargs:
             self.headers = {
                 'Content-Type': 'text/plain',
-                'Authorization': f'Basic {base_64_auth}'
+                'Authorization': f'Token {self.token}'
             }
         else:
             self.headers = {
@@ -127,8 +150,6 @@ class InfluxDBUploaderThread(threading.Thread):
         self.database: str = kwargs['database']
         self.batch_size = kwargs['batch_size']
         self.sleep = kwargs['sleep']
-        self.org: str = kwargs['org']
-        self.token: str = kwargs['token']
         # end of values set by instantiation
 
         self.bulk_list = []
@@ -140,24 +161,33 @@ class InfluxDBUploaderThread(threading.Thread):
             self.version = 2.0
 
         if self.version >= 2.3:
+            self.org: str = kwargs['org']
             self.api_url: str = f"{self.url}/api/v2/write?org={self.org}&bucket={self.database}&precision=ms"
+            print(self.api_url)
         else:
             self.api_url: str = f"{self.url}/api/v2/write?precision=ms&bucket={self.database}"
         self.log.debug(self.url)
         self.log.debug("Started InfluxDB Uploader")
 
         if "username" in kwargs:
-            base_64_auth: str = f'{kwargs["username"]}:{kwargs["password"]}'
-            base_64_auth: bytes = base64.b64encode(base_64_auth.encode())
-            base_64_auth: str = base_64_auth.decode()
+            #base_64_auth: str = f'{kwargs["username"]}:{kwargs["password"]}'
+            #base_64_auth: bytes = base64.b64encode(base_64_auth.encode())
+            #base_64_auth: str = base_64_auth.decode()
+            #self.headers = {
+            #    'Content-Type': 'text/plain',
+            #    'Authorization': f'Basic {base_64_auth}'
+            #}
             self.headers = {
-                'Content-Type': 'text/plain',
-                'Authorization': f'Basic {base_64_auth}'
+                'Content-Type': 'text/plain'
             }
+
+            self.api_url = f'{self.api_url}&u={kwargs["username"]}&p={kwargs["password"]}'
+            print(f"self.api_url = {self.api_url}")
+
         elif "token" in kwargs:
             self.headers = {
                 'Content-Type': 'text/plain',
-                'Authorization': f'Token {self.token}'
+                'Authorization': f'Token {kwargs["token"]}'
             }
         else:
             self.headers = {
@@ -203,8 +233,8 @@ class InfluxDBUploaderThread(threading.Thread):
 
         try:
             print(f'uploading {len(lines)} lines to {self.api_url}')
-            # print(f'headers={self.headers}')
-            # print(f'lines=\n{lines}')
+            print(f'headers={self.headers}')
+            print(f'lines=\n{lines}')
             response = request("POST", self.api_url, headers=self.headers, data="\n".join(lines))
             print(response)
         except Exception as e:
@@ -242,4 +272,3 @@ class InfluxDBUploaderThread(threading.Thread):
 
             self.log.info(f'sleeping for {self.sleep}')
             time.sleep(self.sleep)
-
